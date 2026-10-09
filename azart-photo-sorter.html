@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AZART — Сортування фото</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap&subset=cyrillic" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+:root{--blue:#1a63ff;--blue-dk:#0f4fd6;--blue-soft:#e8f0ff;--ink:#15171d;--mut:#6a7080;--line:#e4e7ee;--bg:#f4f6fa;--green:#17803d;--red:#e5484d;--amber:#fff4dc;--font:'Onest',system-ui,-apple-system,'Segoe UI',Arial,sans-serif}
+body{font-family:var(--font);color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+[hidden]{display:none!important}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+header{display:flex;align-items:center;gap:16px;padding:16px clamp(16px,4vw,48px);border-bottom:1px solid var(--line)}
+.logo{font-weight:700;font-size:22px;color:var(--blue);letter-spacing:.5px}
+header span{color:var(--mut);font-size:15px}
+main{max-width:860px;margin:auto;padding:32px clamp(16px,4vw,32px) 80px}
+h1{font-size:clamp(28px,4vw,36px);font-weight:700;line-height:1.1}
+.sub{color:var(--mut);margin:8px 0 24px;font-size:16px;line-height:1.45}
+.alert{background:var(--amber);border:1px solid #f7d58a;color:#7a4a00;border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:14px;line-height:1.45}
+
+.step{border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:16px;background:#fff;transition:opacity .2s}
+.step.locked{opacity:.45;pointer-events:none}
+.step h2{display:flex;align-items:center;gap:12px;font-size:19px;font-weight:700;margin-bottom:16px}
+.n{width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;font-size:14px;font-weight:600;display:grid;place-items:center;flex:none}
+.step.done .n{background:var(--green)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.f{flex:1;min-width:220px}
+.f label{display:block;font-size:13px;font-weight:600;color:var(--mut);margin-bottom:6px}
+.f input,.f select{width:100%;height:46px;padding:0 14px;border:1px solid #cfd5e2;border-radius:12px;background:#fff}
+.f input:focus,.f select:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft);outline:0}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--mut);margin-top:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:46px;padding:0 20px;border-radius:12px;font-weight:600;font-size:15px;transition:.15s;white-space:nowrap}
+.btn.pri{background:var(--blue);color:#fff}.btn.pri:hover:not(:disabled){background:var(--blue-dk)}
+.btn.soft{background:var(--blue-soft);color:var(--blue)}.btn.soft:hover:not(:disabled){background:#d6e4ff}
+.btn.ghost{border:1px solid var(--line);background:#fff}.btn.ghost:hover:not(:disabled){border-color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.pick{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.pick .path{flex:1;min-width:160px;background:var(--bg);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .path b{color:var(--ink);font-weight:600}
+.msg{margin-top:14px;font-size:14px;color:var(--mut);line-height:1.5}
+.msg.err{color:var(--red)}
+
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
+.stat{background:var(--bg);border-radius:14px;padding:10px 16px;font-size:13px;color:var(--mut)}
+.stat b{display:block;font-size:22px;color:var(--ink);font-weight:700}
+.stat.bad b{color:var(--red)}.stat.good b{color:var(--green)}
+details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:14px}
+summary{cursor:pointer;font-weight:600}
+details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;max-height:220px;overflow:auto}
+.bar{height:10px;border-radius:99px;background:var(--bg);overflow:hidden;margin:14px 0 8px}
+.bar i{display:block;height:100%;width:0;background:var(--blue);transition:width .15s}
+.log{max-height:160px;overflow:auto;font-size:13px;color:var(--mut);line-height:1.6;margin-top:8px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header><div class="logo">AZART</div><span>Сортування фото за замовленнями</span></header>
+
+<main>
+  <h1>Сортування фото</h1>
+  <p class="sub">Інструмент бере замовлення з сайту, знаходить фото за назвою файлу й розкладає їх копії по папках груп, замовників і друку. Оригінали не змінюються.</p>
+
+  <div class="alert" id="unsupported" hidden>Цей інструмент працює лише в браузері Chrome або Edge на комп'ютері. У вашому браузері вибір папок недоступний.</div>
+
+  <section class="step" id="s1">
+    <h2><span class="n">1</span>Підключення до сайту</h2>
+    <div class="row">
+      <div class="f"><label for="site">Адреса сайту</label><input id="site" value="https://azartstudioph.wixstudio.com/azartstudio" autocomplete="off"></div>
+      <div class="f"><label for="key">Ключ доступу</label><input id="key" type="password" autocomplete="off" placeholder="Значення секрету EXPORT_API_KEY"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="remember" checked>Запам'ятати на цьому комп'ютері</label>
+    <div class="row" style="margin-top:14px"><button class="btn pri" id="connect">Підключитися</button></div>
+    <div class="msg" id="m1"></div>
+  </section>
+
+  <section class="step locked" id="s2">
+    <h2><span class="n">2</span>Бланк</h2>
+    <div class="row">
+      <div class="f"><label for="album">Оберіть бланк</label><select id="album"></select></div>
+      <button class="btn pri" id="loadOrders">Завантажити замовлення</button>
+    </div>
+    <div class="msg" id="m2"></div>
+  </section>
+
+  <section class="step locked" id="s3">
+    <h2><span class="n">3</span>Папки на комп'ютері</h2>
+    <div class="pick"><button class="btn soft" id="pickSrc">Папка з фото</button><div class="path" id="srcPath">Не обрано. Тут лежать усі фото з номерами в назвах.</div></div>
+    <div class="pick"><button class="btn soft" id="pickDst">Папка для результату</button><div class="path" id="dstPath">Не обрано. Сюди будуть створені папки груп.</div></div>
+    <div class="msg" id="m3"></div>
+  </section>
+
+  <section class="step locked" id="s4">
+    <h2><span class="n">4</span>Перевірка і копіювання</h2>
+    <div class="row"><button class="btn ghost" id="check">Перевірити (без копіювання)</button><button class="btn pri" id="run" disabled>Розпочати копіювання</button><button class="btn ghost" id="stop" hidden>Зупинити</button></div>
+    <div id="summary"></div>
+    <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
+    <div class="msg" id="m4"></div>
+    <div class="log" id="log"></div>
+    <div class="row" style="margin-top:14px"><button class="btn ghost" id="report" hidden>Завантажити звіт</button></div>
+  </section>
+</main>
+
+<script>
+(function () {
+"use strict";
+
+/*PLAN-START*/
+// ======================================================
+// ПРАВИЛА СОРТУВАННЯ (чиста логіка, без доступу до файлів)
+// ======================================================
+
+// Формат із сайту -> тип: print (друк), digital (електронні), both (друк + електронні)
+function classify(format) {
+  const f = String(format || '').toLowerCase();
+  const p = f.includes('друк'), d = f.includes('електрон');
+  if (p && d) return 'both';
+  if (p) return 'print';
+  if (d) return 'digital';
+  return null;
+}
+
+// Назва, безпечна для Windows, macOS і Linux
+function safeName(s) {
+  const n = String(s == null ? '' : s)
+    .replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
+  return n || '_';
+}
+
+// "IMG_7653.JPG" -> "IMG_7653"
+function baseOf(photo) {
+  return String(photo || '').trim().replace(/\.[^.\/\\]+$/, '');
+}
+
+// Будує список файлів для копіювання:
+//   Група/Друк {розмір}/{фото}[_N]            друковані (спільно для всієї групи, кількості складаються)
+//   Група/Замовник/{фото}                     електронні
+//   Група/Замовник/+друк {розмір}/{фото}[_N]  друк + електронні
+function buildPlan(orders) {
+  const map = new Map();
+  const warnings = [];
+  const usedNames = new Map();
+
+  const add = (dir, base, count, who, fixed) => {
+    const key = dir.join('/').toLowerCase() + '|' + base.toLowerCase();
+    let e = map.get(key);
+    if (!e) { e = { dir, base, count: 0, who: new Set(), fixed: !!fixed }; map.set(key, e); }
+    e.who.add(who);
+    e.count = e.fixed ? 1 : e.count + count;
+  };
+
+  for (const o of orders) {
+    const group = safeName(o.group || 'Без групи');
+    const clientBase = safeName(o.name || 'Без імені');
+
+    // однакові імена в одній групі: "Іванов", "Іванов (2)"
+    const k = (group + '|' + clientBase).toLowerCase();
+    const n = (usedNames.get(k) || 0) + 1;
+    usedNames.set(k, n);
+    const client = n === 1 ? clientBase : `${clientBase} (${n})`;
+
+    for (const it of (o.items || [])) {
+      const base = baseOf(it.photo);
+      const count = Math.max(1, Number(it.count) || 1);
+      const size = String(it.size || '').trim();
+      const kind = classify(it.format);
+      const label = `${group} / ${client}`;
+
+      if (!base) { warnings.push(`${label}: порожній номер фото`); continue; }
+      if (!kind) { warnings.push(`${label}: невідомий формат «${it.format}» (${it.photo})`); continue; }
+
+      if (kind === 'print') {
+        if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
+        add([group, size ? `Друк ${safeName(size)}` : 'Друк (без розміру)'], base, count, client, false);
+      } else if (kind === 'digital') {
+        add([group, client], base, 1, client, true);
+      } else {
+        if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
+        add([group, client, size ? `+друк ${safeName(size)}` : '+друк'], base, count, client, false);
+      }
+    }
+  }
+
+  const entries = [...map.values()].sort((a, b) =>
+    a.dir.join('/').localeCompare(b.dir.join('/'), 'uk') || a.base.localeCompare(b.base, 'uk', { numeric: true }));
+
+  return { entries, warnings };
+}
+
+// Назва файлу: IMG_7653 + _3 (якщо більше 1) + розширення знайденого файлу
+function finalName(entry, ext) {
+  return entry.base + (entry.count > 1 ? '_' + entry.count : '') + ext;
+}
+/*PLAN-END*/
+
+// ======================================================
+// ІНТЕРФЕЙС
+// ======================================================
+const $ = id => document.getElementById(id);
+const esc = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+let orders = [], srcRoot = null, dstRoot = null;
+let index = null, plan = null, matched = null, stopped = false, reportText = '';
+
+if (!window.showDirectoryPicker) $('unsupported').hidden = false;
+
+const unlock = (id, on) => $(id).classList.toggle('locked', !on);
+const done = (id, on) => $(id).classList.toggle('done', on);
+const say = (id, text, err) => { $(id).textContent = text || ''; $(id).classList.toggle('err', !!err); };
+
+try {
+  $('site').value = localStorage.getItem('azartSorterSite') || $('site').value;
+  $('key').value = localStorage.getItem('azartSorterKey') || '';
+} catch (e) {}
+
+// ---------- 1. Підключення ----------
+async function api(params) {
+  const base = $('site').value.trim().replace(/\/+$/, '');
+  const url = new URL(base + '/_functions/exportData');
+  url.searchParams.set('key', $('key').value.trim());
+  Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('Помилка ' + res.status));
+  return data;
+}
+
+$('connect').onclick = async () => {
+  say('m1', 'Підключаємось…');
+  try {
+    const data = await api();
+    try {
+      if ($('remember').checked) {
+        localStorage.setItem('azartSorterSite', $('site').value.trim());
+        localStorage.setItem('azartSorterKey', $('key').value.trim());
+      } else localStorage.removeItem('azartSorterKey');
+    } catch (e) {}
+    $('album').innerHTML = data.albums.map(a => `<option value="${esc(a.id)}">${esc(a.title || '(без назви)')}</option>`).join('');
+    const want = new URLSearchParams(location.search).get('albumId');
+    if (want && data.albums.some(a => a.id === want)) $('album').value = want;
+    say('m1', `Підключено. Бланків: ${data.albums.length}`);
+    done('s1', true); unlock('s2', true);
+  } catch (e) {
+    say('m1', 'Не вдалося підключитися: ' + e.message, true);
+  }
+};
+
+// ---------- 2. Замовлення ----------
+$('loadOrders').onclick = async () => {
+  say('m2', 'Завантажуємо замовлення…');
+  try {
+    const data = await api({ albumId: $('album').value });
+    orders = data.orders || [];
+    const groups = new Set(orders.map(o => o.group || 'Без групи'));
+    const rows = orders.reduce((a, o) => a + o.items.length, 0);
+    say('m2', `Груп із замовленнями: ${groups.size}. Замовників: ${orders.length}. Позицій фото: ${rows}.`);
+    done('s2', true); unlock('s3', true); resetCheck();
+  } catch (e) {
+    say('m2', 'Помилка: ' + e.message, true);
+  }
+};
+
+// ---------- 3. Папки ----------
+async function scan(dir, prefix, idx, stats) {
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'directory') { await scan(h, prefix + name + '/', idx, stats); continue; }
+    const m = /^(.*)\.(jpe?g)$/i.exec(name);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    if (!idx.has(key)) idx.set(key, []);
+    idx.get(key).push({ handle: h, name, ext: '.' + m[2], path: prefix + name });
+    stats.files++;
+  }
+}
+
+$('pickSrc').onclick = async () => {
+  try {
+    const h = await window.showDirectoryPicker({ mode: 'read' });
+    say('m3', 'Читаємо папку з фото…');
+    const idx = new Map(), stats = { files: 0 };
+    await scan(h, '', idx, stats);
+    srcRoot = h; index = idx;
+    $('srcPath').innerHTML = `<b>${esc(h.name)}</b>: знайдено JPG-файлів: ${stats.files}`;
+    say('m3', '');
+    afterFolders();
+  } catch (e) { if (e.name !== 'AbortError') say('m3', 'Помилка: ' + e.message, true); }
+};
+
+$('pickDst').onclick = async () => {
+  try {
+    const h = await window.showDirectoryPicker({ mode: 'readwrite' });
+    dstRoot = h;
+    $('dstPath').innerHTML = `<b>${esc(h.name)}</b>`;
+    say('m3', '');
+    afterFolders();
+  } catch (e) { if (e.name !== 'AbortError') say('m3', 'Помилка: ' + e.message, true); }
+};
+
+async function afterFolders() {
+  resetCheck();
+  if (srcRoot && dstRoot) {
+    if (await srcRoot.isSameEntry(dstRoot)) { say('m3', 'Папка результату має відрізнятись від папки з фото.', true); return; }
+    done('s3', true); unlock('s4', true);
+  }
+}
+
+// ---------- 4. Перевірка і копіювання ----------
+function resetCheck() {
+  plan = matched = null;
+  $('run').disabled = true; $('summary').innerHTML = ''; $('report').hidden = true; say('m4', ''); $('log').innerHTML = '';
+}
+
+$('check').onclick = () => {
+  plan = buildPlan(orders);
+  const found = [], missing = [], multi = [];
+  for (const e of plan.entries) {
+    const hits = index.get(e.base.toLowerCase());
+    if (!hits) { missing.push(e); continue; }
+    if (hits.length > 1) multi.push({ e, hits });
+    found.push({ e, src: hits[0] });
+  }
+  matched = found;
+
+  const folders = new Set(found.map(f => f.e.dir.join('/')));
+  const byGroup = new Map();
+  found.forEach(f => {
+    const g = f.e.dir[0];
+    if (!byGroup.has(g)) byGroup.set(g, new Map());
+    const path = f.e.dir.slice(1).join(' / ') || '(у папці групи)';
+    byGroup.get(g).set(path, (byGroup.get(g).get(path) || 0) + 1);
+  });
+
+  const missList = missing.map(e => `${e.base}: ${e.dir.join(' / ')}`);
+  const multiList = multi.map(m => `${m.e.base}: ${m.hits.length} файлів (береться ${m.hits[0].path})`);
+
+  reportText = [
+    'ЗВІТ СОРТУВАННЯ',
+    `Файлів до копіювання: ${found.length}`,
+    '', `НЕ ЗНАЙДЕНО (${missList.length}):`, ...missList,
+    '', `КІЛЬКА ФАЙЛІВ З ОДНАКОВОЮ НАЗВОЮ (${multiList.length}):`, ...multiList,
+    '', `ПОПЕРЕДЖЕННЯ (${plan.warnings.length}):`, ...plan.warnings
+  ].join('\n');
+
+  $('summary').innerHTML = `
+    <div class="stats">
+      <div class="stat good"><b>${found.length}</b>файлів до копіювання</div>
+      <div class="stat"><b>${folders.size}</b>папок буде створено</div>
+      <div class="stat ${missing.length ? 'bad' : ''}"><b>${missing.length}</b>не знайдено</div>
+      <div class="stat"><b>${plan.warnings.length + multi.length}</b>попереджень</div>
+    </div>
+    ${[...byGroup].map(([g, m]) => `<details><summary>${esc(g)}: ${[...m.values()].reduce((a, b) => a + b, 0)} файлів</summary><ul>${[...m].map(([p, n]) => `<li>${esc(p)}: ${n}</li>`).join('')}</ul></details>`).join('')}
+    ${missing.length ? `<details open><summary>Не знайдено в папці з фото (${missing.length})</summary><ul>${missList.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+    ${plan.warnings.length + multi.length ? `<details><summary>Попередження (${plan.warnings.length + multi.length})</summary><ul>${[...plan.warnings, ...multiList].map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}`;
+
+  $('report').hidden = false;
+  $('run').disabled = !found.length;
+  say('m4', found.length ? 'Перевірте підсумок і натисніть «Розпочати копіювання».' : 'Немає що копіювати: жодного фото не знайдено.', !found.length);
+};
+
+$('stop').onclick = () => { stopped = true; };
+
+$('run').onclick = async () => {
+  if (!matched || !matched.length) return;
+  stopped = false;
+  $('run').disabled = $('check').disabled = $('pickSrc').disabled = $('pickDst').disabled = true;
+  $('stop').hidden = false; $('barWrap').hidden = false; $('log').innerHTML = '';
+
+  const dirCache = new Map();
+  const ensureDir = async parts => {
+    let cur = dstRoot, key = '';
+    for (const p of parts) {
+      key += '/' + p;
+      if (!dirCache.has(key)) dirCache.set(key, await cur.getDirectoryHandle(p, { create: true }));
+      cur = dirCache.get(key);
+    }
+    return cur;
+  };
+
+  let copied = 0, skipped = 0, failed = 0;
+  const errors = [];
+
+  for (let i = 0; i < matched.length && !stopped; i++) {
+    const { e, src } = matched[i];
+    const name = finalName(e, src.ext);
+    try {
+      const dir = await ensureDir(e.dir);
+      const file = await src.handle.getFile();
+      let existing = null;
+      try { existing = await (await dir.getFileHandle(name)).getFile(); } catch (x) {}
+      if (existing && existing.size === file.size) { skipped++; }
+      else {
+        const fh = await dir.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await file.stream().pipeTo(w);
+        copied++;
+      }
+    } catch (x) {
+      failed++; errors.push(`${e.dir.join('/')}/${name}: ${x.message}`);
+    }
+    $('bar').style.width = ((i + 1) / matched.length * 100) + '%';
+    say('m4', `Оброблено ${i + 1} з ${matched.length}. Скопійовано: ${copied}, вже було: ${skipped}, помилок: ${failed}`);
+  }
+
+  reportText += `\n\nКОПІЮВАННЯ\nСкопійовано: ${copied}\nВже були (пропущено): ${skipped}\nПомилок: ${failed}\n${errors.join('\n')}`;
+  $('log').innerHTML = errors.map(t => `<div>${esc(t)}</div>`).join('');
+  say('m4', (stopped ? 'Зупинено. ' : 'Готово. ') + `Скопійовано: ${copied}, вже було: ${skipped}, помилок: ${failed}.`, failed > 0);
+  $('stop').hidden = true; $('check').disabled = $('pickSrc').disabled = $('pickDst').disabled = false;
+};
+
+$('report').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([reportText], { type: 'text/plain;charset=utf-8' }));
+  a.download = 'звіт-сортування.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+})();
+</script>
+</body>
+</html>
