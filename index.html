@@ -50,6 +50,12 @@ h1{font-size:clamp(28px,4vw,36px);font-weight:700;line-height:1.1}
 .stat{background:var(--bg);border-radius:14px;padding:10px 16px;font-size:13px;color:var(--mut)}
 .stat b{display:block;font-size:22px;color:var(--ink);font-weight:700}
 .stat.bad b{color:var(--red)}.stat.good b{color:var(--green)}
+.groups-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 10px;font-weight:600;font-size:15px}
+.groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.g{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;font-size:14px;font-weight:500;user-select:none;transition:.15s}
+.g input{width:17px;height:17px;accent-color:var(--blue);flex:none}
+.g small{display:block;color:var(--mut);font-size:12px;font-weight:400}
+.g:has(input:checked){border-color:var(--blue);background:var(--blue-soft)}
 details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:14px}
 summary{cursor:pointer;font-weight:600}
 details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;max-height:220px;overflow:auto}
@@ -73,10 +79,9 @@ details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;
     <h2><span class="n">1</span>Підключення до сайту</h2>
     <div class="row">
       <div class="f"><label for="site">Адреса сайту</label><input id="site" value="https://azartstudioph.wixstudio.com/azartstudio" autocomplete="off"></div>
-      <div class="f"><label for="key">Ключ доступу</label><input id="key" type="password" autocomplete="off" placeholder="Значення секрету EXPORT_API_KEY"></div>
+      <div class="f"><label for="key">Ключ доступу</label><input id="key" value="sort_photo_azart" autocomplete="off"></div>
     </div>
-    <label class="chk"><input type="checkbox" id="remember" checked>Запам'ятати на цьому комп'ютері</label>
-    <div class="row" style="margin-top:14px"><button class="btn pri" id="connect">Підключитися</button></div>
+    <div class="row" style="margin-top:16px"><button class="btn pri" id="connect">Підключитися</button></div>
     <div class="msg" id="m1"></div>
   </section>
 
@@ -87,6 +92,10 @@ details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;
       <button class="btn pri" id="loadOrders">Завантажити замовлення</button>
     </div>
     <div class="msg" id="m2"></div>
+    <div id="groupsBox" hidden>
+      <div class="groups-h"><span>Групи для копіювання</span><label class="g"><input type="checkbox" id="allGroups">Усі групи</label></div>
+      <div class="groups" id="groups"></div>
+    </div>
   </section>
 
   <section class="step locked" id="s3">
@@ -215,11 +224,6 @@ const unlock = (id, on) => $(id).classList.toggle('locked', !on);
 const done = (id, on) => $(id).classList.toggle('done', on);
 const say = (id, text, err) => { $(id).textContent = text || ''; $(id).classList.toggle('err', !!err); };
 
-try {
-  $('site').value = localStorage.getItem('azartSorterSite') || $('site').value;
-  $('key').value = localStorage.getItem('azartSorterKey') || '';
-} catch (e) {}
-
 // ---------- 1. Підключення ----------
 async function api(params) {
   const base = $('site').value.trim().replace(/\/+$/, '');
@@ -236,12 +240,6 @@ $('connect').onclick = async () => {
   say('m1', 'Підключаємось…');
   try {
     const data = await api();
-    try {
-      if ($('remember').checked) {
-        localStorage.setItem('azartSorterSite', $('site').value.trim());
-        localStorage.setItem('azartSorterKey', $('key').value.trim());
-      } else localStorage.removeItem('azartSorterKey');
-    } catch (e) {}
     $('album').innerHTML = data.albums.map(a => `<option value="${esc(a.id)}">${esc(a.title || '(без назви)')}</option>`).join('');
     const want = new URLSearchParams(location.search).get('albumId');
     if (want && data.albums.some(a => a.id === want)) $('album').value = want;
@@ -252,7 +250,37 @@ $('connect').onclick = async () => {
   }
 };
 
-// ---------- 2. Замовлення ----------
+// ---------- 2. Замовлення і вибір груп ----------
+const groupOf = o => o.group || 'Без групи';
+const groupInputs = () => [...$('groups').querySelectorAll('input')];
+const selectedGroups = () => new Set(groupInputs().filter(i => i.checked).map(i => i.value));
+const activeOrders = () => { const s = selectedGroups(); return orders.filter(o => s.has(groupOf(o))); };
+
+function renderGroups() {
+  const counts = new Map();
+  orders.forEach(o => counts.set(groupOf(o), (counts.get(groupOf(o)) || 0) + 1));
+  const names = [...counts.keys()].sort((a, b) => a.localeCompare(b, 'uk', { numeric: true }));
+  $('groups').innerHTML = names.map(g =>
+    `<label class="g"><input type="checkbox" value="${esc(g)}" checked><span>${esc(g)}<small>замовників: ${counts.get(g)}</small></span></label>`).join('');
+  $('groupsBox').hidden = !names.length;
+  syncGroups();
+}
+
+function syncGroups() {
+  const all = groupInputs(), on = all.filter(i => i.checked).length;
+  $('allGroups').checked = all.length > 0 && on === all.length;
+  $('allGroups').indeterminate = on > 0 && on < all.length;
+  refreshCheck();
+  if (all.length && !on) say('m4', 'Оберіть хоча б одну групу.', true);
+}
+function refreshCheck() { $('check').disabled = !activeOrders().length; }
+
+$('groups').addEventListener('change', () => { resetCheck(); syncGroups(); });
+$('allGroups').addEventListener('change', e => {
+  groupInputs().forEach(i => { i.checked = e.target.checked; });
+  resetCheck(); syncGroups();
+});
+
 $('loadOrders').onclick = async () => {
   say('m2', 'Завантажуємо замовлення…');
   try {
@@ -261,7 +289,8 @@ $('loadOrders').onclick = async () => {
     const groups = new Set(orders.map(o => o.group || 'Без групи'));
     const rows = orders.reduce((a, o) => a + o.items.length, 0);
     say('m2', `Груп із замовленнями: ${groups.size}. Замовників: ${orders.length}. Позицій фото: ${rows}.`);
-    done('s2', true); unlock('s3', true); resetCheck();
+    renderGroups();
+    done('s2', true); unlock('s3', true); resetCheck(); syncGroups();
   } catch (e) {
     say('m2', 'Помилка: ' + e.message, true);
   }
@@ -318,7 +347,7 @@ function resetCheck() {
 }
 
 $('check').onclick = () => {
-  plan = buildPlan(orders);
+  plan = buildPlan(activeOrders());
   const found = [], missing = [], multi = [];
   for (const e of plan.entries) {
     const hits = index.get(e.base.toLowerCase());
@@ -342,6 +371,7 @@ $('check').onclick = () => {
 
   reportText = [
     'ЗВІТ СОРТУВАННЯ',
+    'Групи: ' + [...selectedGroups()].join(', '),
     `Файлів до копіювання: ${found.length}`,
     '', `НЕ ЗНАЙДЕНО (${missList.length}):`, ...missList,
     '', `КІЛЬКА ФАЙЛІВ З ОДНАКОВОЮ НАЗВОЮ (${multiList.length}):`, ...multiList,
@@ -411,7 +441,7 @@ $('run').onclick = async () => {
   reportText += `\n\nКОПІЮВАННЯ\nСкопійовано: ${copied}\nВже були (пропущено): ${skipped}\nПомилок: ${failed}\n${errors.join('\n')}`;
   $('log').innerHTML = errors.map(t => `<div>${esc(t)}</div>`).join('');
   say('m4', (stopped ? 'Зупинено. ' : 'Готово. ') + `Скопійовано: ${copied}, вже було: ${skipped}, помилок: ${failed}.`, failed > 0);
-  $('stop').hidden = true; $('check').disabled = $('pickSrc').disabled = $('pickDst').disabled = false;
+  $('stop').hidden = true; $('pickSrc').disabled = $('pickDst').disabled = false; refreshCheck();
 };
 
 $('report').onclick = () => {
