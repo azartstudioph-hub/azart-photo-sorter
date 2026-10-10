@@ -56,6 +56,10 @@ h1{font-size:clamp(28px,4vw,36px);font-weight:700;line-height:1.1}
 .g input{width:17px;height:17px;accent-color:var(--blue);flex:none}
 .g small{display:block;color:var(--mut);font-size:12px;font-weight:400}
 .g:has(input:checked){border-color:var(--blue);background:var(--blue-soft)}
+.maprow{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.maprow span{min-width:110px;font-weight:600;font-size:14px}
+.maprow select{flex:1;min-width:200px;height:40px;padding:0 10px;border:1px solid #cfd5e2;border-radius:10px;background:#fff;font-size:14px}
+#mapBox{margin-bottom:14px}
 details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:14px}
 summary{cursor:pointer;font-weight:600}
 details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;max-height:220px;overflow:auto}
@@ -107,6 +111,11 @@ details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;
 
   <section class="step locked" id="s4">
     <h2><span class="n">4</span>Перевірка і копіювання</h2>
+    <details id="mapBox" hidden>
+      <summary>Папки груп у папці з фото (необов'язково)</summary>
+      <p class="msg" style="margin:10px 0 12px">Якщо в різних групах є різні фото з однаковими назвами, вкажіть, у якій папці лежать фото кожної групи. За замовчуванням папка визначається за назвою групи (наприклад, «Група 8» або «8»). Якщо файл не вдається визначити однозначно, він не копіюється й потрапляє в конфлікти.</p>
+      <div id="mapList"></div>
+    </details>
     <div class="row"><button class="btn ghost" id="check">Перевірити (без копіювання)</button><button class="btn pri" id="run" disabled>Розпочати копіювання</button><button class="btn ghost" id="stop" hidden>Зупинити</button></div>
     <div id="summary"></div>
     <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
@@ -164,16 +173,17 @@ function buildPlan(orders) {
   const warnings = [];
   const usedNames = new Map();
 
-  const add = (dir, base, count, who, fixed) => {
+  const add = (dir, base, count, who, fixed, group) => {
     const key = dir.join('/').toLowerCase() + '|' + base.toLowerCase();
     let e = map.get(key);
-    if (!e) { e = { dir, base, count: 0, who: new Set(), fixed: !!fixed }; map.set(key, e); }
+    if (!e) { e = { dir, base, count: 0, who: new Set(), fixed: !!fixed, group }; map.set(key, e); }
     e.who.add(who);
     e.count = e.fixed ? 1 : e.count + count;
   };
 
   for (const o of orders) {
-    const group = safeName(o.group || 'Без групи');
+    const rawGroup = o.group || 'Без групи';
+    const group = safeName(rawGroup);
     const clientBase = safeName(o.name || 'Без імені');
 
     // однакові імена в одній групі: "Іванов", "Іванов (2)"
@@ -194,12 +204,12 @@ function buildPlan(orders) {
 
       if (kind === 'print') {
         if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
-        add([group, size ? `Друк ${safeName(size)}` : 'Друк (без розміру)'], base, count, client, false);
+        add([group, size ? `Друк ${safeName(size)}` : 'Друк (без розміру)'], base, count, client, false, rawGroup);
       } else if (kind === 'digital') {
-        add([group, DIGITAL_ROOT, client], base, 1, client, true);
+        add([group, DIGITAL_ROOT, client], base, 1, client, true, rawGroup);
       } else {
         if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
-        add([group, DIGITAL_ROOT, client, size ? `${BOTH_FOLDER} ${safeName(size)}` : BOTH_FOLDER], base, count, client, false);
+        add([group, DIGITAL_ROOT, client, size ? `${BOTH_FOLDER} ${safeName(size)}` : BOTH_FOLDER], base, count, client, false, rawGroup);
       }
     }
   }
@@ -208,6 +218,58 @@ function buildPlan(orders) {
     a.dir.join('/').localeCompare(b.dir.join('/'), 'uk') || a.base.localeCompare(b.base, 'uk', { numeric: true }));
 
   return { entries, warnings };
+}
+
+// ------------------------------------------------------
+// ВИБІР ПРАВИЛЬНОГО ФАЙЛУ, КОЛИ ОДНОЙМЕННИХ ФАЙЛІВ КІЛЬКА
+// ------------------------------------------------------
+// Порівняння назв папок: прибираємо пробіли та розділові знаки
+const norm = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+// Чи схожа одна з папок шляху на цю групу: "Група 8", "гр. 8", "8", "Gr8".
+// Число порівнюється точно, тому "Група 1" не плутається з "Група 11".
+function matchesGroup(group, segs) {
+  const g = norm(group);
+  const num = (String(group).match(/\d+/) || [])[0];
+  return segs.some(seg => {
+    const s = norm(seg);
+    if (!s) return false;
+    if (s === g) return true;
+    if (num === undefined) return false;
+    const m = s.match(/^(?:група|гр|group|gr)?(\d+)$/u);
+    return !!m && Number(m[1]) === Number(num);
+  });
+}
+
+// hits: усі файли з такою назвою у всій папці з фото
+// mapped: папка групи, яку вказав користувач (або '')
+// allGroups: назви ВСІХ груп бланка (щоб розпізнавати папки інших груп)
+// Повертає { src } | { missing } | { conflict } | { otherGroup }.
+// Головне правило: файл з папки ІНШОЇ групи ніколи не береться. Якщо однозначно
+// визначити файл не вдається, нічого не копіюється: краще пропустити, ніж взяти не те фото.
+function chooseSource(group, hits, mapped, allGroups) {
+
+  // Папку групи вказав користувач: беремо лише файли з неї
+  if (mapped) {
+    const pool = hits.filter(h => (h.dirPath + '/').startsWith(mapped + '/'));
+    if (!pool.length) return { missing: true };
+    if (pool.length === 1) return { src: pool[0] };
+    const byName = pool.filter(h => matchesGroup(group, h.segs));
+    if (byName.length === 1) return { src: byName[0], note: 'обрано за папкою групи' };
+    return { conflict: pool };
+  }
+
+  // 1. Файл у папці цієї групи
+  const own = hits.filter(h => matchesGroup(group, h.segs));
+  if (own.length === 1) return hits.length > 1 ? { src: own[0], note: 'обрано за папкою групи' } : { src: own[0] };
+  if (own.length > 1) return { conflict: own };
+
+  // 2. У папці цієї групи файлу немає: відкидаємо файли з папок інших груп
+  const foreign = hits.filter(h => (allGroups || []).some(g => g !== group && matchesGroup(g, h.segs)));
+  const neutral = hits.filter(h => !foreign.includes(h));
+  if (neutral.length === 1) return { src: neutral[0] };       // лежить поза папками груп
+  if (neutral.length > 1) return { conflict: neutral };
+  return { otherGroup: foreign };                              // є лише в папці іншої групи
 }
 
 // Назва файлу: IMG_7653 + _3 (якщо більше 1) + розширення знайденого файлу
@@ -222,7 +284,7 @@ function finalName(entry, ext) {
 const $ = id => document.getElementById(id);
 const esc = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-let orders = [], srcRoot = null, dstRoot = null;
+let orders = [], srcRoot = null, dstRoot = null, mapping = {}, srcFolders = [];
 let index = null, plan = null, matched = null, stopped = false, reportText = '';
 
 if (!window.showDirectoryPicker) $('unsupported').hidden = false;
@@ -278,8 +340,21 @@ function syncGroups() {
   $('allGroups').checked = all.length > 0 && on === all.length;
   $('allGroups').indeterminate = on > 0 && on < all.length;
   refreshCheck();
+  renderMapping();
   if (all.length && !on) say('m4', 'Оберіть хоча б одну групу.', true);
 }
+function renderMapping() {
+  const groups = [...selectedGroups()].sort((a, b) => a.localeCompare(b, 'uk', { numeric: true }));
+  $('mapBox').hidden = !(index && groups.length);
+  if ($('mapBox').hidden) return;
+  $('mapList').innerHTML = groups.map(g =>
+    `<div class="maprow"><span>${esc(g)}</span><select data-g="${esc(g)}"><option value="">Автоматично (за назвою папки)</option>${
+      srcFolders.map(f => `<option value="${esc(f)}"${mapping[g] === f ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select></div>`).join('');
+}
+$('mapList').addEventListener('change', e => {
+  if (e.target.dataset.g !== undefined) { mapping[e.target.dataset.g] = e.target.value; resetCheck(); }
+});
+
 function refreshCheck() { $('check').disabled = !activeOrders().length; }
 
 $('groups').addEventListener('change', () => { resetCheck(); syncGroups(); });
@@ -311,7 +386,10 @@ async function scan(dir, prefix, idx, stats) {
     if (!m) continue;
     const key = m[1].toLowerCase();
     if (!idx.has(key)) idx.set(key, []);
-    idx.get(key).push({ handle: h, name, ext: '.' + m[2], path: prefix + name });
+    const dirPath = prefix.replace(/\/$/, '');
+    const segs = dirPath ? dirPath.split('/') : [];
+    idx.get(key).push({ handle: h, name, ext: '.' + m[2], path: prefix + name, dirPath, segs });
+    segs.forEach((_, i) => stats.folders.add(segs.slice(0, i + 1).join('/')));
     stats.files++;
   }
 }
@@ -320,11 +398,14 @@ $('pickSrc').onclick = async () => {
   try {
     const h = await window.showDirectoryPicker({ mode: 'read' });
     say('m3', 'Читаємо папку з фото…');
-    const idx = new Map(), stats = { files: 0 };
+    const idx = new Map(), stats = { files: 0, folders: new Set() };
     await scan(h, '', idx, stats);
     srcRoot = h; index = idx;
+    srcFolders = [...stats.folders].sort((a, b) => a.localeCompare(b, 'uk', { numeric: true }));
+    mapping = {};
     $('srcPath').innerHTML = `<b>${esc(h.name)}</b>: знайдено JPG-файлів: ${stats.files}`;
     say('m3', '');
+    renderMapping();
     afterFolders();
   } catch (e) { if (e.name !== 'AbortError') say('m3', 'Помилка: ' + e.message, true); }
 };
@@ -355,12 +436,16 @@ function resetCheck() {
 
 $('check').onclick = () => {
   plan = buildPlan(activeOrders());
-  const found = [], missing = [], multi = [];
+  const allGroups = [...new Set(orders.map(groupOf))];
+  const found = [], missing = [], conflicts = [], picked = [], foreign = [];
   for (const e of plan.entries) {
     const hits = index.get(e.base.toLowerCase());
     if (!hits) { missing.push(e); continue; }
-    if (hits.length > 1) multi.push({ e, hits });
-    found.push({ e, src: hits[0] });
+    const r = chooseSource(e.group, hits, mapping[e.group] || '', allGroups);
+    if (r.missing) missing.push(e);
+    else if (r.otherGroup) foreign.push({ e, hits: r.otherGroup });
+    else if (r.conflict) conflicts.push({ e, hits: r.conflict });
+    else { found.push({ e, src: r.src }); if (r.note) picked.push({ e, src: r.src }); }
   }
   matched = found;
 
@@ -374,14 +459,18 @@ $('check').onclick = () => {
   });
 
   const missList = missing.map(e => `${e.base}: ${e.dir.join(' / ')}`);
-  const multiList = multi.map(m => `${m.e.base}: ${m.hits.length} файлів (береться ${m.hits[0].path})`);
+  const conflictList = conflicts.map(c => `${c.e.base} (${c.e.group}): ${c.hits.map(h => h.path).join(' | ')}`);
+  const foreignList = foreign.map(f => `${f.e.base} (${f.e.group}): є лише тут: ${f.hits.map(h => h.path).join(' | ')}`);
+  const pickedList = picked.map(p => `${p.e.base} (${p.e.group}): ${p.src.path}`);
 
   reportText = [
     'ЗВІТ СОРТУВАННЯ',
     'Групи: ' + [...selectedGroups()].join(', '),
     `Файлів до копіювання: ${found.length}`,
     '', `НЕ ЗНАЙДЕНО (${missList.length}):`, ...missList,
-    '', `КІЛЬКА ФАЙЛІВ З ОДНАКОВОЮ НАЗВОЮ (${multiList.length}):`, ...multiList,
+    '', `КОНФЛІКТИ, НЕ СКОПІЙОВАНО (${conflictList.length}):`, ...conflictList,
+    '', `ЛИШЕ В ПАПЦІ ІНШОЇ ГРУПИ, НЕ СКОПІЙОВАНО (${foreignList.length}):`, ...foreignList,
+    '', `ОДНОЙМЕННІ ФАЙЛИ, ОБРАНО ЗА ПАПКОЮ ГРУПИ (${pickedList.length}):`, ...pickedList,
     '', `ПОПЕРЕДЖЕННЯ (${plan.warnings.length}):`, ...plan.warnings
   ].join('\n');
 
@@ -390,15 +479,22 @@ $('check').onclick = () => {
       <div class="stat good"><b>${found.length}</b>файлів до копіювання</div>
       <div class="stat"><b>${folders.size}</b>папок буде створено</div>
       <div class="stat ${missing.length ? 'bad' : ''}"><b>${missing.length}</b>не знайдено</div>
-      <div class="stat"><b>${plan.warnings.length + multi.length}</b>попереджень</div>
+      <div class="stat ${conflicts.length ? 'bad' : ''}"><b>${conflicts.length}</b>конфліктів</div>
+      <div class="stat ${foreign.length ? 'bad' : ''}"><b>${foreign.length}</b>лише в іншій групі</div>
+      <div class="stat"><b>${plan.warnings.length}</b>попереджень</div>
     </div>
     ${[...byGroup].map(([g, m]) => `<details><summary>${esc(g)}: ${[...m.values()].reduce((a, b) => a + b, 0)} файлів</summary><ul>${[...m].map(([p, n]) => `<li>${esc(p)}: ${n}</li>`).join('')}</ul></details>`).join('')}
     ${missing.length ? `<details open><summary>Не знайдено в папці з фото (${missing.length})</summary><ul>${missList.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
-    ${plan.warnings.length + multi.length ? `<details><summary>Попередження (${plan.warnings.length + multi.length})</summary><ul>${[...plan.warnings, ...multiList].map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}`;
+    ${conflicts.length ? `<details open><summary>Конфлікти: однойменні фото в кількох папках, не скопійовано (${conflicts.length})</summary><ul>${conflictList.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+    ${foreign.length ? `<details open><summary>Є лише в папці іншої групи, не скопійовано (${foreign.length})</summary><ul>${foreignList.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+    ${picked.length ? `<details><summary>Однойменні файли, обрано за папкою групи (${picked.length})</summary><ul>${pickedList.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+    ${plan.warnings.length ? `<details><summary>Попередження (${plan.warnings.length})</summary><ul>${plan.warnings.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}`;
 
   $('report').hidden = false;
   $('run').disabled = !found.length;
-  say('m4', found.length ? 'Перевірте підсумок і натисніть «Розпочати копіювання».' : 'Немає що копіювати: жодного фото не знайдено.', !found.length);
+  say('m4', !found.length ? 'Немає що копіювати: жодного фото не знайдено.'
+    : (conflicts.length || foreign.length) ? `Не буде скопійовано фото: ${conflicts.length + foreign.length} (конфлікти та файли з інших груп). Вкажіть папки груп вище й перевірте ще раз, або продовжуйте без них.`
+    : 'Перевірте підсумок і натисніть «Розпочати копіювання».', !found.length || (conflicts.length + foreign.length) > 0);
 };
 
 $('stop').onclick = () => { stopped = true; };
