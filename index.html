@@ -125,6 +125,10 @@ details ul{margin:10px 0 2px;padding-left:18px;color:var(--mut);line-height:1.6;
 // ПРАВИЛА СОРТУВАННЯ (чиста логіка, без доступу до файлів)
 // ======================================================
 
+// Назви службових папок (змінюйте тут)
+const DIGITAL_ROOT = 'Електронні фото + додатковий друк';   // усі папки замовників
+const BOTH_FOLDER  = 'Друк + електронне фото';              // + розмір
+
 // Формат із сайту -> тип: print (друк), digital (електронні), both (друк + електронні)
 function classify(format) {
   const f = String(format || '').toLowerCase();
@@ -149,9 +153,12 @@ function baseOf(photo) {
 }
 
 // Будує список файлів для копіювання:
-//   Група/Друк {розмір}/{фото}[_N]            друковані (спільно для всієї групи, кількості складаються)
-//   Група/Замовник/{фото}                     електронні
-//   Група/Замовник/+друк {розмір}/{фото}[_N]  друк + електронні
+//   Група/Друк {розмір}/{фото}[_N]
+//       друковані (спільно для всієї групи, кількості складаються)
+//   Група/Електронні фото + додатковий друк/Замовник/{фото}
+//       електронні
+//   Група/Електронні фото + додатковий друк/Замовник/Друк + електронне фото {розмір}/{фото}[_N]
+//       друк + електронні
 function buildPlan(orders) {
   const map = new Map();
   const warnings = [];
@@ -189,10 +196,10 @@ function buildPlan(orders) {
         if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
         add([group, size ? `Друк ${safeName(size)}` : 'Друк (без розміру)'], base, count, client, false);
       } else if (kind === 'digital') {
-        add([group, client], base, 1, client, true);
+        add([group, DIGITAL_ROOT, client], base, 1, client, true);
       } else {
         if (!size) warnings.push(`${label}: у фото ${it.photo} друк без розміру`);
-        add([group, client, size ? `+друк ${safeName(size)}` : '+друк'], base, count, client, false);
+        add([group, DIGITAL_ROOT, client, size ? `${BOTH_FOLDER} ${safeName(size)}` : BOTH_FOLDER], base, count, client, false);
       }
     }
   }
